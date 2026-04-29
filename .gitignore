@@ -68,10 +68,10 @@ desktop.ini
 # Project artifacts
 data/
 models/
-results/
 uploads/
 backend/uploads/
 *.pth
+!results/saved_models/*.pth
 *.rar
 *.zip
 *.tar

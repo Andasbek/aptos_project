@@ -1,0 +1,21 @@
+{
+    "model": "efficientnet_b0",
+    "freeze_backbone": false,
+    "best_val_accuracy": 0.8226466575716235,
+    "final_train_accuracy": 0.9255718675315807,
+    "final_val_accuracy": 0.7939972714870396,
+    "final_train_loss": 0.2483881109910192,
+    "final_val_loss": 1.2262080880174206,
+    "parameters": 4013953,
+    "trainable_parameters": 4013953,
+    "epochs": 15,
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "class_weights": [
+        0.4057617783546448,
+        1.9794594049453735,
+        0.7331331372261047,
+        3.794818639755249,
+        2.4827117919921875
+    ]
+}

@@ -1,0 +1,21 @@
+{
+    "model": "resnet50",
+    "freeze_backbone": false,
+    "best_val_accuracy": 0.8335607094133697,
+    "final_train_accuracy": 0.9593717992488904,
+    "final_val_accuracy": 0.8212824010914052,
+    "final_train_loss": 0.13701451255645147,
+    "final_val_loss": 1.1516222771648494,
+    "parameters": 23518277,
+    "trainable_parameters": 23518277,
+    "epochs": 15,
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "class_weights": [
+        0.4057617783546448,
+        1.9794594049453735,
+        0.7331331372261047,
+        3.794818639755249,
+        2.4827117919921875
+    ]
+}

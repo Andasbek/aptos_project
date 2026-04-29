@@ -1,0 +1,21 @@
+{
+    "model": "cnn",
+    "freeze_backbone": false,
+    "best_val_accuracy": 0.6889495225102319,
+    "final_train_accuracy": 0.6766814612495732,
+    "final_val_accuracy": 0.6875852660300137,
+    "final_train_loss": 1.0770125074897785,
+    "final_val_loss": 1.1043081499869958,
+    "parameters": 1702181,
+    "trainable_parameters": 1702181,
+    "epochs": 15,
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "class_weights": [
+        0.4057617783546448,
+        1.9794594049453735,
+        0.7331331372261047,
+        3.794818639755249,
+        2.4827117919921875
+    ]
+}
