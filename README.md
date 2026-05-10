@@ -5,9 +5,9 @@
 
 В репозитории есть две части:
 
-- ML-пайплайн на PyTorch для обучения, оценки и сравнения моделей.
-- Web-прототип: FastAPI backend для inference и Next.js frontend для загрузки
-  изображения и просмотра результата.
+- ML-пайплайн на PyTorch для обучения, оценки и сравнения четырёх моделей.
+- Web-прототип: FastAPI backend для inference + LLM-ассистента и Next.js
+  frontend с многоязычным интерфейсом (English / Русский / Қазақша).
 
 ## Поддерживаемые классы
 
@@ -21,67 +21,83 @@
 
 ## Модели
 
-В `src/models.py` реализованы:
+В `src/models.py` реализованы четыре архитектуры, и web-прототип позволяет
+выбирать любую из них во время инференса (если соответствующий checkpoint
+лежит в `results/saved_models/`):
 
-- Custom CNN
-- ResNet50
-- EfficientNet-B0
-- MobileNetV2
+- Custom CNN — `best_cnn.pth`
+- ResNet50 — `best_resnet50.pth` (по умолчанию)
+- EfficientNet-B0 — `best_efficientnet_b0.pth`
+- MobileNetV2 — `best_mobilenet_v2.pth`
 
-Web-прототип по умолчанию использует лучший checkpoint ResNet50:
+## Возможности web-прототипа
 
-```text
-results/saved_models/best_resnet50.pth
-```
+- Загрузка снимка глазного дна и инференс выбранной моделью.
+- Переключение классификатора на лету через UI.
+- AI-ассистент на базе OpenAI: автоматическое объяснение результата и чат
+  по диагнозу.
+- Глобальный переключатель языка (English / Русский / Қазақша) — управляет
+  одновременно UI и языком ответов LLM.
+- Markdown-рендер ответов ассистента (заголовки, списки, жирный текст).
 
 ## Структура проекта
 
 ```text
 aptos_project/
-+-- backend/                  FastAPI inference API
++-- backend/                  FastAPI inference + LLM API
 |   +-- app/
-|   |   +-- main.py            Endpoints: /health, /model-info, /predict
+|   |   +-- main.py            Endpoints: /health, /model-info, /predict, /explain, /chat
 |   |   +-- inference.py       Preprocessing and prediction
-|   |   +-- model_loader.py    Loading ResNet50 checkpoint
-|   |   +-- schemas.py         Pydantic response schemas
+|   |   +-- model_loader.py    Loading of all 4 trained models
+|   |   +-- llm.py             OpenAI client, multilingual prompts
+|   |   +-- schemas.py         Pydantic request/response schemas
 |   |   +-- utils.py           Image and class helpers
+|   +-- .env.example           Template for OPENAI_API_KEY
 |   +-- requirements.txt
 +-- frontend/                 Next.js App Router UI
+|   +-- public/
+|   |   +-- logo.png           AT University logo (header)
 |   +-- src/
-|   |   +-- app/
-|   |   +-- components/
-|   |   +-- lib/api.ts         Client API wrapper
+|   |   +-- app/               Layout + page (server)
+|   |   +-- components/        UI (uploader, chat, model info, language switcher)
+|   |   +-- lib/api.ts         Backend API wrapper
+|   |   +-- lib/i18n.ts        Translation dictionaries (en/ru/kk)
+|   |   +-- lib/LanguageContext.tsx  Global language Provider
 |   +-- package.json
 +-- data/                     APTOS dataset, ignored by Git
 +-- docs/                     Project documentation
 +-- notebooks/                Research notebooks
 +-- results/                  Metrics, figures, checkpoints, ignored by Git
 +-- src/                      Training and evaluation scripts
++-- images.png                Source logo (copied to frontend/public/logo.png)
 +-- requirements.txt          ML dependencies
 +-- README.md
 ```
 
 ## Быстрый старт: web-прототип
 
-Сначала убедитесь, что checkpoint лежит здесь:
+Перед запуском убедитесь, что в `results/saved_models/` лежит хотя бы один
+checkpoint (по умолчанию `best_resnet50.pth`).
 
-```text
-results/saved_models/best_resnet50.pth
-```
-
-Запуск backend из корня проекта:
+### 1. Backend
 
 ```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+copy .env.example .env
+# открыть .env и вписать OPENAI_API_KEY=sk-...
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Backend будет доступен на `http://localhost:8000`.
+Backend будет доступен на `http://localhost:8000`. Без OpenAI ключа
+`/predict` продолжит работать, а `/explain` и `/chat` вернут `503` с
+понятным сообщением.
 
-Запуск frontend во втором терминале:
+### 2. Frontend
+
+Во втором терминале:
 
 ```powershell
 cd frontend
@@ -89,10 +105,8 @@ npm install
 npm run dev
 ```
 
-Frontend будет доступен на `http://localhost:3000`.
-
-По умолчанию frontend обращается к `http://localhost:8000`. При необходимости
-URL можно изменить через переменную:
+Frontend будет доступен на `http://localhost:3000`. По умолчанию обращается
+к `http://localhost:8000`. URL backend можно переопределить:
 
 ```powershell
 $env:NEXT_PUBLIC_API_BASE_URL="http://localhost:8000"
@@ -104,8 +118,10 @@ npm run dev
 | Метод | Endpoint | Назначение |
 |---|---|---|
 | GET | `/health` | Проверка состояния backend |
-| GET | `/model-info` | Информация о модели, checkpoint и устройстве |
-| POST | `/predict` | Загрузка изображения и получение предсказания |
+| GET | `/model-info` | Список доступных моделей, статус чекпоинтов, устройство, поддерживаемые языки, флаг доступности LLM |
+| POST | `/predict` | Инференс выбранной моделью (form-поле `model`) |
+| POST | `/explain` | Объяснение предсказания через LLM (требует `OPENAI_API_KEY`) |
+| POST | `/chat` | Чат с ассистентом по результату предсказания |
 
 Пример ответа `/predict`:
 
@@ -120,11 +136,25 @@ npm run dev
     "Moderate": 0.87,
     "Severe": 0.03,
     "Proliferative DR": 0.02
-  }
+  },
+  "model_name": "resnet50"
 }
 ```
 
-Если checkpoint отсутствует, `/predict` возвращает `503` с понятным сообщением.
+`/explain` и `/chat` принимают поле `language: "en" | "ru" | "kk"`. Ответ
+ассистента возвращается на выбранном языке.
+
+## Конфигурация LLM
+
+В `backend/.env`:
+
+```text
+OPENAI_API_KEY=sk-your-key
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Файл `backend/.env` не коммитится (исключён в `.gitignore`). Шаблон —
+`backend/.env.example`.
 
 ## Обучение и оценка
 
@@ -162,7 +192,7 @@ python src/evaluate.py --model efficientnet_b0
 python src/evaluate.py --model mobilenet_v2
 ```
 
-Сравнение сохраненных метрик:
+Сравнение сохранённых метрик:
 
 ```powershell
 python src/compare_models.py
@@ -174,6 +204,7 @@ python src/compare_models.py
 
 - обзор проекта;
 - установка и запуск;
+- web-прототип (LLM, мультиязычность, выбор модели);
 - данные;
 - архитектура кода;
 - модели;
@@ -184,4 +215,5 @@ python src/compare_models.py
 ## Важно
 
 Проект является исследовательским прототипом и не заменяет консультацию
-офтальмолога.
+офтальмолога. Ответы LLM-ассистента — образовательного характера, не
+медицинская рекомендация.

@@ -6,9 +6,11 @@
 
 - Python 3.10 или новее.
 - Windows PowerShell или совместимая командная оболочка.
-- Node.js 64-bit для frontend.
-- GPU NVIDIA с CUDA - опционально, но желательно для ускорения обучения.
+- Node.js 64-bit для frontend (рекомендуется 20.19+ или 22 LTS).
+- GPU NVIDIA с CUDA — опционально, но желательно для ускорения обучения.
 - Датасет APTOS 2019, размещенный в папке `data/`.
+- OpenAI API-ключ — опционально, нужен для функций объяснения и чата
+  ассистента в web-прототипе. Без ключа `/predict` продолжает работать.
 
 ## Установка ML-окружения
 
@@ -107,8 +109,9 @@ python src/compare_models.py
 
 ## Запуск backend
 
-Backend нужен для web-прототипа и inference через API. Он использует отдельный
-`backend/requirements.txt`.
+Backend нужен для web-прототипа. Он использует отдельный
+`backend/requirements.txt`, в котором перечислены FastAPI, PyTorch для
+inference, OpenAI SDK и `python-dotenv`.
 
 Из корня проекта:
 
@@ -117,6 +120,30 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+### Настройка .env (для LLM)
+
+Скопируйте шаблон и впишите ключ:
+
+```powershell
+copy .env.example .env
+```
+
+Откройте `backend/.env` и заполните:
+
+```text
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+`OPENAI_MODEL` опционален, по умолчанию `gpt-4o-mini`. Файл `.env` не
+коммитится — он исключён в `.gitignore`. Без ключа `/predict` будет
+работать, а `/explain` и `/chat` вернут `503` с понятным сообщением.
+
+### Запуск сервера
+
+```powershell
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -133,13 +160,12 @@ Invoke-RestMethod http://localhost:8000/health
 Invoke-RestMethod http://localhost:8000/model-info
 ```
 
-Для `/predict` нужен checkpoint:
+`/model-info` вернёт список всех четырёх моделей с признаком наличия
+чекпоинта (`checkpoint_exists`), флаг `llm_enabled` и поддерживаемые языки.
 
-```text
-results/saved_models/best_resnet50.pth
-```
-
-Если файла нет, endpoint вернет `503` с сообщением, куда положить checkpoint.
+Для `/predict` нужен хотя бы один checkpoint в `results/saved_models/`.
+По умолчанию используется `best_resnet50.pth`. Если выбранной модели нет,
+endpoint вернёт `503` с сообщением, куда положить файл.
 
 ## Запуск frontend
 
@@ -157,8 +183,12 @@ Frontend будет доступен на:
 http://localhost:3000
 ```
 
-Next.js использует native SWC binary, поэтому на Windows нужен 64-bit Node.js.
-32-bit Node.js может падать при `npm run dev` или `npm run build`.
+Next.js использует native SWC binary, поэтому на Windows нужен 64-bit
+Node.js. 32-bit Node.js может падать при `npm run dev` или `npm run build`.
+
+`npm install` может выдать `EBADENGINE` для пакета `eslint-visitor-keys` —
+это лишь предупреждение, на работу не влияет. При желании можно обновить
+Node до 20.19+ или 22 LTS.
 
 ## Настройка URL backend
 
@@ -181,6 +211,16 @@ $env:NEXT_PUBLIC_API_BASE_URL="http://localhost:8000"
 npm run dev
 ```
 
+## Языки и модели в UI
+
+После запуска frontend в правом верхнем углу появится переключатель
+языка (English / Русский / Қазақша). Он сохраняет выбор в `localStorage`
+и одновременно меняет UI и язык ответов LLM.
+
+В блоке загрузки изображения есть селектор модели — он динамически
+заполняется из `/model-info`. Если соответствующего файла
+`best_<model>.pth` нет, пункт помечается как `(missing)` и недоступен.
+
 ## Проверка GPU
 
 Проект автоматически выбирает устройство:
@@ -190,4 +230,37 @@ torch.device("cuda" if torch.cuda.is_available() else "cpu")
 ```
 
 При доступной CUDA обучение использует mixed precision через `torch.amp` и
-включает `pin_memory=True` в `DataLoader`.
+включает `pin_memory=True` в `DataLoader`. Backend использует то же
+устройство для inference.
+
+## Типичные проблемы
+
+### `Fatal error in launcher: Unable to create process using ...`
+
+Случается, если `.venv` создан в одной папке, а потом папка проекта была
+перенесена. Скрипты venv хранят абсолютный путь к python.exe, при переносе
+ломаются. Решение — пересоздать venv:
+
+```powershell
+Remove-Item -Recurse -Force .\backend\.venv
+py -m venv .\backend\.venv
+.\backend\.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+```
+
+### `OPENAI_API_KEY is not set`
+
+Откройте `backend/.env` и убедитесь, что строка `OPENAI_API_KEY=sk-...`
+заполнена. Перезапустите uvicorn — переменные читаются один раз при
+импорте `backend/app/llm.py`.
+
+### `Checkpoint for '<model>' was not found`
+
+`/predict` вызвали с моделью, для которой нет файла в
+`results/saved_models/`. Либо обучите её:
+
+```powershell
+python src/train.py --model <model>
+```
+
+либо выберите другую модель в UI.

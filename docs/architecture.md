@@ -3,9 +3,8 @@
 Проект состоит из трех основных частей:
 
 - `src/` - обучение, оценка и сравнение моделей.
-- `backend/` - FastAPI inference API.
-- `frontend/` - Next.js интерфейс для загрузки изображения и просмотра
-  результата.
+- `backend/` - FastAPI inference + LLM API.
+- `frontend/` - Next.js интерфейс с многоязычностью и AI-ассистентом.
 
 ## ML-пайплайн
 
@@ -161,23 +160,47 @@ python src/evaluate.py --model resnet50
 
 ## Backend
 
-Backend находится в `backend/app/` и предоставляет FastAPI API для inference.
+Backend находится в `backend/app/` и предоставляет FastAPI API для
+inference и взаимодействия с LLM.
 
-Основной поток `/predict`:
+Основной поток `/predict` с выбираемой моделью:
 
 ```text
-main.py
+main.py POST /predict
 +-- validate UploadFile
++-- validate model name (cnn / resnet50 / efficientnet_b0 / mobilenet_v2)
 +-- read image bytes
 +-- utils.read_image()
-+-- inference.predict_image()
-|   +-- model_loader.load_model()
++-- inference.predict_image(image, model_name)
+|   +-- model_loader.load_model(model_name)   lru_cache(maxsize=4)
 |   +-- resize to 224x224
 |   +-- ToTensor
 |   +-- ImageNet normalization
 |   +-- model inference with torch.no_grad()
 |   +-- softmax probabilities
-+-- return PredictionResponse
++-- return PredictionResponse(model_name=...)
+```
+
+Поток LLM:
+
+```text
+main.py POST /explain
++-- ExplainRequest(prediction, language)
++-- llm.generate_explanation(prediction, language)
+|   +-- load .env (один раз при импорте)
+|   +-- _system_prompt(language)
+|   +-- _EXPLAIN_INSTRUCTIONS[language].format(prediction=...)
+|   +-- OpenAI client.chat.completions.create()
++-- return ExplainResponse(explanation, language)
+
+main.py POST /chat
++-- ChatRequest(messages, prediction?, language)
++-- llm.chat_about_prediction(messages, prediction, language)
+|   +-- system: base prompt + language instruction
+|   +-- system: prediction context (если задан)
+|   +-- user/assistant messages
+|   +-- OpenAI client.chat.completions.create()
++-- return ChatResponse(reply, language)
 ```
 
 ### `backend/app/main.py`
@@ -188,25 +211,29 @@ main.py
 | Метод | Endpoint | Назначение |
 |---|---|---|
 | GET | `/health` | Проверка состояния backend. |
-| GET | `/model-info` | Имя модели, путь к checkpoint, наличие checkpoint, device и классы. |
-| POST | `/predict` | Загрузка изображения и получение результата классификации. |
+| GET | `/model-info` | `default_model`, список `available_models`, device, классы, поддерживаемые языки, флаг `llm_enabled`. |
+| POST | `/predict` | Инференс выбранной моделью (form-поле `model`). |
+| POST | `/explain` | Объяснение предсказания через LLM на выбранном языке. |
+| POST | `/chat` | Чат с LLM в контексте предсказания. |
 
 ### `backend/app/model_loader.py`
 
-Загружает модель ResNet50 через `get_model()` из `src/models.py`.
+Реестр доступных моделей и кеш загруженных весов.
 
-Важные константы:
+Ключевые элементы:
 
-- `MODEL_NAME = "resnet50"`
-- `CHECKPOINT_PATH = results/saved_models/best_resnet50.pth`
-- `DEVICE = cuda`, если CUDA доступна, иначе `cpu`
-
-Модель кэшируется через `lru_cache(maxsize=1)`, поэтому checkpoint загружается
-один раз при первом inference-запросе.
+- `AVAILABLE_MODELS` — словарь `{ "resnet50": "best_resnet50.pth", ... }`.
+- `DEFAULT_MODEL_NAME = "resnet50"`.
+- `DEVICE = cuda`, если CUDA доступна, иначе `cpu`.
+- `available_models()` — возвращает список `{ name, checkpoint_path,
+  checkpoint_exists, is_default }` для UI.
+- `load_model(model_name)` — `lru_cache(maxsize=4)`, чтобы каждая модель
+  загружалась только один раз. Поддерживает три формата чекпоинта: чистый
+  `state_dict`, `{"state_dict": ...}` и `{"model_state_dict": ...}`.
 
 ### `backend/app/inference.py`
 
-Содержит preprocessing и `predict_image()`.
+Содержит preprocessing и `predict_image(image, model_name)`.
 
 Предобработка:
 
@@ -219,15 +246,50 @@ main.py
 - `predicted_class`;
 - `class_name`;
 - `confidence`;
-- `probabilities`.
+- `probabilities`;
+- `model_name` — какая модель использовалась.
+
+### `backend/app/llm.py`
+
+Обёртка над OpenAI Python SDK.
+
+Ключевые элементы:
+
+- При импорте загружает `backend/.env` через `python-dotenv`.
+- `_get_client()` — `lru_cache(maxsize=1)` для OpenAI-клиента, читает
+  `OPENAI_API_KEY`. Если ключа нет — `LLMConfigurationError`.
+- `_get_model()` — читает `OPENAI_MODEL` (по умолчанию `gpt-4o-mini`).
+- `SUPPORTED_LANGUAGES = ("en", "ru", "kk")`.
+- `_LANGUAGE_INSTRUCTIONS` — короткая инструкция стиля «отвечай на
+  английском/русском/казахском», добавляется к системному промпту.
+- `_EXPLAIN_INSTRUCTIONS` — полные многоязычные шаблоны для `/explain`.
+- `_format_prediction()` — преобразует словарь предсказания в человекочитаемый
+  блок текста для LLM.
+- `generate_explanation(prediction, language)` — структурированное объяснение.
+- `chat_about_prediction(messages, prediction, language)` — обработка чата
+  с контекстом предсказания.
+
+Ошибки:
+
+- `LLMConfigurationError` → endpoint возвращает `503`.
+- `LLMRequestError` (OpenAI API упал) → endpoint возвращает `502`.
 
 ### `backend/app/schemas.py`
 
-Описывает Pydantic-схемы ответов API:
+Pydantic-схемы:
 
 - `HealthResponse`;
-- `ModelInfoResponse`;
-- `PredictionResponse`.
+- `ModelOption` — описание одного варианта модели для `/model-info`;
+- `ModelInfoResponse` — `default_model`, `available_models`, `device`,
+  `classes`, `llm_enabled`, `supported_languages`;
+- `PredictionResponse` — поля включают `model_name`;
+- `ExplainRequest` — `{ prediction, language }`;
+- `ExplainResponse` — `{ explanation, language }`;
+- `ChatMessage` — `{ role: "user" | "assistant", content }`;
+- `ChatRequest` — `{ messages[], prediction?, language }`;
+- `ChatResponse` — `{ reply, language }`.
+
+`Language = Literal["en", "ru", "kk"]`.
 
 ### `backend/app/utils.py`
 
@@ -238,24 +300,33 @@ main.py
 
 Frontend находится в `frontend/` и использует Next.js App Router.
 
+### `frontend/src/app/layout.tsx`
+
+Корневой layout. Оборачивает приложение в `<LanguageProvider>`, чтобы
+любой клиентский компонент мог обратиться к `useLanguage()`.
+
 ### `frontend/src/app/page.tsx`
 
-Главный экран приложения:
+Главный экран приложения (server component):
 
-- заголовок проекта;
-- компонент загрузки изображения;
-- панель информации о backend и checkpoint;
-- предупреждение, что прототип не заменяет врача.
+- логотип AT University слева;
+- заголовок и подзаголовок (через `LocalizedHeader`);
+- глобальный `LanguageSelector` справа в шапке;
+- `ImageUploader` — основная форма;
+- `ModelInfo` — статус backend и моделей;
+- `LocalizedDisclaimer` — предупреждение, что прототип не заменяет врача.
 
 ### `frontend/src/components/ImageUploader.tsx`
 
 Клиентский компонент для основного workflow:
 
-- выбор файла через file input;
-- локальный preview изображения;
+- выбор файла через file input и preview;
+- селектор модели (`<select>`), варианты приходят из `/model-info`;
+  отсутствующие чекпоинты помечаются как `(missing)` и недоступны;
 - сброс выбранного файла;
-- отправка файла в `/predict`;
-- отображение ошибки или результата.
+- отправка файла + имени модели в `/predict`;
+- после успешного ответа рендерит `PredictionResult`,
+  `PredictionExplanation` и `PredictionChat`.
 
 ### `frontend/src/components/PredictionResult.tsx`
 
@@ -265,22 +336,79 @@ Frontend находится в `frontend/` и использует Next.js App R
 - confidence;
 - вероятности всех пяти классов в виде шкал.
 
+### `frontend/src/components/PredictionExplanation.tsx`
+
+После получения предсказания автоматически вызывает `/explain` с текущим
+языком. Ответ рендерится через `MarkdownContent`.
+
+### `frontend/src/components/PredictionChat.tsx`
+
+Чат с ассистентом по результату предсказания:
+
+- хранит локальную историю сообщений;
+- отправляет всю историю + `prediction` + `language` в `/chat`;
+- сообщения пользователя — обычный текст;
+- сообщения ассистента — markdown через `MarkdownContent` с компактным
+  вариантом стилей.
+
+### `frontend/src/components/MarkdownContent.tsx`
+
+Обёртка над `react-markdown` + `remark-gfm`. Стилизует все markdown-элементы
+через Tailwind, поддерживает два варианта: `default` (для `PredictionExplanation`)
+и `chat` (для `PredictionChat`). Ссылки открываются в новом табе с
+`rel="noreferrer noopener"`.
+
 ### `frontend/src/components/ModelInfo.tsx`
 
 Запрашивает `/model-info` и показывает:
 
 - текущий API base URL;
-- имя модели;
 - device;
-- статус checkpoint: `Ready` или `Missing`.
+- статус LLM (`Ready` / `No API key`);
+- список всех доступных моделей с чекпоинт-статусом и пометкой `default`.
+
+### `frontend/src/components/LanguageSelector.tsx`
+
+Глобальный селектор языка с двумя вариантами: компактный (для шапки) и
+обычный (для inline-форм). Использует `useLanguage()` и переключает язык
+на лету. Сохраняет выбор в `localStorage` (через provider).
+
+### `frontend/src/components/LocalizedHeader.tsx`, `LocalizedDisclaimer.tsx`
+
+Маленькие клиентские обёртки над текстами шапки и дисклеймера. Нужны,
+чтобы `page.tsx` остался серверным компонентом.
+
+### `frontend/src/lib/i18n.ts`
+
+Содержит:
+
+- тип `Language = "en" | "ru" | "kk"`;
+- `SUPPORTED_LANGUAGES`, `LANGUAGE_LABELS`;
+- словарь `translations` с тремя вариантами для каждого ключа;
+- тип `TranslationKey`;
+- `isLanguage()` — type guard.
+
+Ключи плоские: `header.title`, `uploader.analyze`, `chat.empty` и т.д.
+
+### `frontend/src/lib/LanguageContext.tsx`
+
+React Context Provider:
+
+- начальный язык определяется по `localStorage` (`aptos-ui-language`),
+  иначе по `navigator.language` (`ru-*` → ru, `kk-*` → kk, иначе en);
+- сохраняет язык в `localStorage` и обновляет `<html lang>` при смене;
+- предоставляет `{ language, setLanguage, t }` через `useLanguage()`.
 
 ### `frontend/src/lib/api.ts`
 
 Клиентский wrapper для backend:
 
 - `API_BASE_URL`, по умолчанию `http://localhost:8000`;
+- типы `ModelOption`, `ModelInfo`, `PredictionResponse`, `ChatMessage`;
 - `fetchModelInfo()`;
-- `predictImage()`;
+- `predictImage(file, modelName)`;
+- `explainPrediction(prediction, language)`;
+- `chatWithLLM(messages, prediction, language)`;
 - общий разбор ошибок API.
 
 URL backend можно переопределить переменной окружения:

@@ -2,16 +2,55 @@
 
 import { ImagePlus, Loader2, RotateCcw, Send } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
-import { predictImage, type PredictionResponse } from "@/lib/api";
+import {
+  fetchModelInfo,
+  predictImage,
+  type ModelOption,
+  type PredictionResponse,
+} from "@/lib/api";
+import { useLanguage } from "@/lib/LanguageContext";
 import PredictionResult from "./PredictionResult";
+import PredictionExplanation from "./PredictionExplanation";
+import PredictionChat from "./PredictionChat";
+
+const MODEL_LABELS: Record<string, string> = {
+  resnet50: "ResNet50",
+  efficientnet_b0: "EfficientNet-B0",
+  mobilenet_v2: "MobileNetV2",
+  cnn: "Custom CNN",
+};
 
 export default function ImageUploader() {
+  const { t, language } = useLanguage();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("resnet50");
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchModelInfo()
+      .then((info) => {
+        if (!isMounted) return;
+        setModels(info.available_models);
+        const defaultModel =
+          info.available_models.find((m) => m.is_default && m.checkpoint_exists)
+            ?.name ??
+          info.available_models.find((m) => m.checkpoint_exists)?.name ??
+          info.default_model;
+        setSelectedModel(defaultModel);
+      })
+      .catch(() => {
+        // ModelInfo component will surface the error separately.
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -43,7 +82,7 @@ export default function ImageUploader() {
 
   async function handleAnalyze() {
     if (!selectedFile) {
-      setError("Select a retinal fundus image first.");
+      setError(t("uploader.errors.noFile"));
       return;
     }
 
@@ -52,10 +91,12 @@ export default function ImageUploader() {
     setResult(null);
 
     try {
-      const prediction = await predictImage(selectedFile);
+      const prediction = await predictImage(selectedFile, selectedModel);
       setResult(prediction);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Prediction failed.");
+      setError(
+        err instanceof Error ? err.message : t("uploader.errors.predictionFailed"),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -67,20 +108,52 @@ export default function ImageUploader() {
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.12em] text-clinical">
-              Upload
+              {t("uploader.eyebrow")}
             </p>
-            <h2 className="mt-1 text-2xl font-bold text-ink">Fundus Image</h2>
+            <h2 className="mt-1 text-2xl font-bold text-ink">
+              {t("uploader.title")}
+            </h2>
           </div>
           <button
             type="button"
             onClick={resetSelection}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            title="Reset selected image"
+            title={t("uploader.resetTitle")}
           >
             <RotateCcw className="h-4 w-4" aria-hidden="true" />
-            Reset
+            {t("uploader.reset")}
           </button>
         </div>
+
+        <label className="mb-4 flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+            {t("uploader.model")}
+          </span>
+          <select
+            value={selectedModel}
+            onChange={(event) => setSelectedModel(event.target.value)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-clinical"
+          >
+            {models.length === 0 ? (
+              <option value={selectedModel}>
+                {MODEL_LABELS[selectedModel] ?? selectedModel}
+              </option>
+            ) : (
+              models.map((model) => (
+                <option
+                  key={model.name}
+                  value={model.name}
+                  disabled={!model.checkpoint_exists}
+                >
+                  {MODEL_LABELS[model.name] ?? model.name}
+                  {model.checkpoint_exists
+                    ? ""
+                    : ` ${t("uploader.modelMissingSuffix")}`}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
 
         <label className="flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center transition hover:border-clinical hover:bg-teal-50/50">
           <input
@@ -102,9 +175,11 @@ export default function ImageUploader() {
             <div className="flex max-w-md flex-col items-center gap-3">
               <ImagePlus className="h-12 w-12 text-clinical" aria-hidden="true" />
               <div>
-                <p className="text-base font-semibold text-ink">Choose an image</p>
+                <p className="text-base font-semibold text-ink">
+                  {t("uploader.placeholder.title")}
+                </p>
                 <p className="mt-1 text-sm leading-6 text-slate-600">
-                  PNG, JPG, or JPEG fundus image for APTOS class prediction.
+                  {t("uploader.placeholder.subtitle")}
                 </p>
               </div>
             </div>
@@ -133,12 +208,18 @@ export default function ImageUploader() {
             ) : (
               <Send className="h-4 w-4" aria-hidden="true" />
             )}
-            Analyze Image
+            {t("uploader.analyze")}
           </button>
         </div>
       </section>
 
-      {result ? <PredictionResult result={result} /> : null}
+      {result ? (
+        <>
+          <PredictionResult result={result} />
+          <PredictionExplanation prediction={result} language={language} />
+          <PredictionChat prediction={result} language={language} />
+        </>
+      ) : null}
     </div>
   );
 }

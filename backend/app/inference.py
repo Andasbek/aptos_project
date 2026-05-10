@@ -2,7 +2,7 @@ import torch
 from PIL import Image
 from torchvision import transforms
 
-from .model_loader import DEVICE, load_model
+from .model_loader import DEFAULT_MODEL_NAME, DEVICE, load_model
 from .utils import CLASS_NAMES
 
 
@@ -20,8 +20,8 @@ preprocess = transforms.Compose(
 )
 
 
-def predict_image(image: Image.Image) -> dict:
-    model = load_model()
+def predict_image(image: Image.Image, model_name: str = DEFAULT_MODEL_NAME) -> dict:
+    model = load_model(model_name)
     tensor = preprocess(image).unsqueeze(0).to(DEVICE)
 
     with torch.no_grad():
@@ -40,5 +40,5 @@ def predict_image(image: Image.Image) -> dict:
         "class_name": CLASS_NAMES[predicted_class],
         "confidence": confidence,
         "probabilities": probabilities,
+        "model_name": model_name,
     }
-

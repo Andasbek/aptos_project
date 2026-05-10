@@ -1,4 +1,7 @@
+"use client";
+
 import { Activity, Gauge } from "lucide-react";
+import { useLanguage } from "@/lib/LanguageContext";
 import type { PredictionResponse } from "@/lib/api";
 
 type PredictionResultProps = {
@@ -10,6 +13,7 @@ function formatPercent(value: number) {
 }
 
 export default function PredictionResult({ result }: PredictionResultProps) {
+  const { t } = useLanguage();
   const entries = Object.entries(result.probabilities);
 
   return (
@@ -17,16 +21,18 @@ export default function PredictionResult({ result }: PredictionResultProps) {
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.12em] text-clinical">
-            Prediction
+            {t("result.eyebrow")}
           </p>
           <h2 className="mt-1 text-2xl font-bold text-ink">{result.class_name}</h2>
-          <p className="mt-1 text-sm text-slate-600">Class {result.predicted_class}</p>
+          <p className="mt-1 text-sm text-slate-600">
+            {t("result.classLabel")} {result.predicted_class}
+          </p>
         </div>
         <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
           <Gauge className="h-5 w-5 text-clinical" aria-hidden="true" />
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Confidence
+              {t("result.confidence")}
             </p>
             <p className="text-xl font-bold text-ink">{formatPercent(result.confidence)}</p>
           </div>
@@ -60,4 +66,3 @@ export default function PredictionResult({ result }: PredictionResultProps) {
     </section>
   );
 }
-

@@ -7,10 +7,12 @@
 классифицировать изображение глазного дна по одной из пяти стадий
 диабетической ретинопатии.
 
-Помимо ML-скриптов, в проекте есть web-прототип: FastAPI backend загружает
-обученный checkpoint ResNet50 и выполняет inference, а Next.js frontend
-позволяет выбрать изображение, отправить его в API и увидеть предсказанный
-класс, confidence и вероятности по всем классам.
+Помимо ML-скриптов, в проекте есть web-прототип. FastAPI backend загружает
+любую из четырёх обученных моделей и выполняет inference. Next.js frontend
+позволяет выбрать классификатор и язык интерфейса, отправить изображение в
+API, получить предсказанный класс с вероятностями и автоматическое
+объяснение от AI-ассистента (OpenAI). Поддерживается чат с ассистентом
+по результату.
 
 ## Классы
 
@@ -36,15 +38,21 @@ ML-часть поддерживает полный цикл экспериме�
 8. Оценка модели на validation split.
 9. Сравнение моделей по accuracy, precision, recall и F1-score.
 
-Web-часть добавляет пользовательский сценарий inference:
+Web-часть добавляет пользовательский сценарий inference и объяснения:
 
 1. Frontend получает изображение через file input и показывает preview.
-2. Файл отправляется в backend как `multipart/form-data`.
-3. Backend проверяет тип файла, открывает изображение через Pillow и применяет
-   ту же базовую предобработку, что validation pipeline.
-4. ResNet50 возвращает logits, которые преобразуются в вероятности через
-   `softmax`.
-5. Frontend отображает предсказанный класс и распределение вероятностей.
+2. Пользователь выбирает классификатор (`resnet50` / `efficientnet_b0` /
+   `mobilenet_v2` / `cnn`) и язык (en / ru / kk).
+3. Файл и имя модели отправляются в `/predict` как `multipart/form-data`.
+4. Backend проверяет тип файла, открывает изображение через Pillow и
+   применяет ту же базовую предобработку, что validation pipeline.
+5. Выбранная модель возвращает logits, которые преобразуются в вероятности
+   через `softmax`.
+6. Frontend отображает предсказанный класс и распределение вероятностей.
+7. После предсказания фронтенд автоматически вызывает `/explain` и
+   получает подробное объяснение от LLM на выбранном языке.
+8. Пользователь может задать дополнительные вопросы в чате (`/chat`),
+   ответ возвращается на том же языке.
 
 ## Структура репозитория
 
@@ -52,17 +60,25 @@ Web-часть добавляет пользовательский сценар�
 aptos_project/
 +-- backend/
 |   +-- app/
-|   |   +-- main.py
-|   |   +-- inference.py
-|   |   +-- model_loader.py
-|   |   +-- schemas.py
+|   |   +-- main.py            FastAPI: /health, /model-info, /predict, /explain, /chat
+|   |   +-- inference.py       Preprocessing + predict_image(model_name)
+|   |   +-- model_loader.py    Reestr 4 моделей, lru_cache(maxsize=4)
+|   |   +-- llm.py             OpenAI client + многоязычные промпты
+|   |   +-- schemas.py         Pydantic-схемы запросов/ответов
 |   |   +-- utils.py
+|   +-- .env.example           Шаблон для OPENAI_API_KEY
 |   +-- requirements.txt
 +-- frontend/
+|   +-- public/
+|   |   +-- logo.png           Логотип AT University в шапке
 |   +-- src/
-|   |   +-- app/
-|   |   +-- components/
-|   |   +-- lib/api.ts
+|   |   +-- app/               layout.tsx + page.tsx
+|   |   +-- components/        ImageUploader, ModelInfo, PredictionResult,
+|   |                          PredictionExplanation, PredictionChat,
+|   |                          LanguageSelector, MarkdownContent, Localized*
+|   |   +-- lib/api.ts         API-клиент
+|   |   +-- lib/i18n.ts        Словари переводов en/ru/kk
+|   |   +-- lib/LanguageContext.tsx  Глобальный Provider языка
 |   +-- package.json
 +-- data/
 |   +-- train.csv
@@ -81,7 +97,8 @@ aptos_project/
 +-- results/
 |   +-- figures/
 |   +-- metrics/
-|   +-- saved_models/
+|   +-- saved_models/         best_cnn.pth, best_resnet50.pth,
+|                             best_efficientnet_b0.pth, best_mobilenet_v2.pth
 +-- src/
 |   +-- compare_models.py
 |   +-- config.py
@@ -91,6 +108,7 @@ aptos_project/
 |   +-- plots.py
 |   +-- train.py
 |   +-- utils.py
++-- images.png                 Исходный логотип
 +-- requirements.txt
 +-- README.md
 ```
@@ -118,14 +136,17 @@ Backend:
 - python-multipart
 - Pillow
 - PyTorch и Torchvision
+- OpenAI Python SDK
+- python-dotenv
 
 Frontend:
 
 - Next.js App Router
-- React
+- React 18
 - TypeScript
 - Tailwind CSS
 - lucide-react
+- react-markdown + remark-gfm
 
 ## Основные ограничения
 
@@ -135,6 +156,10 @@ Frontend:
 - Размер входного изображения зафиксирован в `src/config.py` и
   `backend/app/inference.py`: `224x224`.
 - Для Windows в `DataLoader` используется `num_workers=0`.
-- Web-прототип использует только `results/saved_models/best_resnet50.pth`.
+- Web-прототип использует чекпоинты из `results/saved_models/`. Если файл
+  отсутствует — соответствующий вариант в селекторе модели становится
+  недоступным.
+- LLM-функциональность требует `OPENAI_API_KEY` в `backend/.env`. Без
+  ключа `/explain` и `/chat` возвращают `503`, инференс продолжает работать.
 - Проект является исследовательским прототипом и не заменяет медицинскую
-  диагностику.
+  диагностику. Ответы LLM-ассистента носят образовательный характер.

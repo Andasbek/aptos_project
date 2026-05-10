@@ -10,8 +10,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -31,6 +31,9 @@ backend/.venv/
 .env
 .env.*
 *.local
+# But keep template files in the repo
+!.env.example
+!**/.env.example
 
 # Jupyter
 .ipynb_checkpoints/
@@ -52,6 +55,8 @@ node_modules/
 frontend/node_modules/
 frontend/.next/
 out/
+# TypeScript incremental build info
+*.tsbuildinfo
 
 # IDEs and OS files
 .idea/
