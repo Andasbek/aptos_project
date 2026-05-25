@@ -1,4 +1,3 @@
-import Image from "next/image";
 import ImageUploader from "@/components/ImageUploader";
 import LanguageSelector from "@/components/LanguageSelector";
 import LocalizedHeader from "@/components/LocalizedHeader";
@@ -11,17 +10,7 @@ export default function Home() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <header className="flex flex-col gap-4 border-b border-slate-200 pb-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-center gap-4">
-              <Image
-                src="/logo.png"
-                alt="AT University logo"
-                width={88}
-                height={88}
-                priority
-                className="h-20 w-auto"
-              />
-              <LocalizedHeader />
-            </div>
+            <LocalizedHeader />
             <LanguageSelector />
           </div>
         </header>

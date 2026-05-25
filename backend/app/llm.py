@@ -79,7 +79,7 @@ def _get_client() -> OpenAI:
 
 
 def _get_model() -> str:
-    return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    return os.getenv("OPENAI_MODEL", "gpt-5.5")
 
 
 def llm_available() -> bool:
@@ -117,16 +117,39 @@ def _format_prediction(prediction: dict) -> str:
     )
 
 
+def _get_temperature() -> float | None:
+    raw = os.getenv("OPENAI_TEMPERATURE")
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def _chat_completion(messages: Iterable[dict]) -> str:
     client = _get_client()
+    kwargs: dict = {
+        "model": _get_model(),
+        "messages": list(messages),
+    }
+    temperature = _get_temperature()
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     try:
-        response = client.chat.completions.create(
-            model=_get_model(),
-            messages=list(messages),
-            temperature=0.3,
-        )
+        response = client.chat.completions.create(**kwargs)
     except OpenAIError as exc:
-        raise LLMRequestError(f"OpenAI request failed: {exc}") from exc
+        message = str(exc)
+        if "temperature" in message and "temperature" in kwargs:
+            kwargs.pop("temperature", None)
+            try:
+                response = client.chat.completions.create(**kwargs)
+            except OpenAIError as retry_exc:
+                raise LLMRequestError(
+                    f"OpenAI request failed: {retry_exc}"
+                ) from retry_exc
+        else:
+            raise LLMRequestError(f"OpenAI request failed: {exc}") from exc
 
     choice = response.choices[0]
     content = choice.message.content or ""
